@@ -104,7 +104,7 @@ Create `modernz.conf` in your mpv script-opts directory:
 | screenshot_button          | no            | show screenshot button                                                                                                                                                                                 |
 | ontop_button               | yes           | show `window on top (pin)` button                                                                                                                                                                      |
 | loop_button                | no            | show `loop` button                                                                                                                                                                                     |
-| shuffle_button             | no            | show `shuffle` button                                                                                                                                                                                  |
+| shuffle_button             | no            | show `shuffle` button                                                                                                                                                                                     |
 | speed_button               | no            | show speed control button                                                                                                                                                                              |
 | speed_button_click         | 1             | speed change amount per click                                                                                                                                                                          |
 | speed_button_scroll        | 0.25          | speed change amount on scroll                                                                                                                                                                          |
@@ -116,8 +116,8 @@ Create `modernz.conf` in your mpv script-opts directory:
 | midbuttons_size            | 24            | icon size for the middle buttons                                                                                                                                                                       |
 | sidebuttons_size           | 24            | icon size for the side buttons                                                                                                                                                                         |
 | zoom_control               | yes           | show zoom controls in image viewer mode                                                                                                                                                                |
-| zoom_in_max                | 4             | maximum zoom in value                                                                                                                                                                                  |
-| zoom_out_min               | -1            | minimum zoom out value                                                                                                                                                                                 |
+| zoom_in_max                | 4             | icon size for the side buttons                                                                                                                                                                         |
+| zoom_out_min               | -1            | icon size for the side buttons                                                                                                                                                                         |
 
 
 ### Colors and style
