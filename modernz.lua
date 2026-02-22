@@ -3839,6 +3839,10 @@ mp.observe_property("chapter-list", "native", function(_, list)
     request_init()
 end)
 mp.register_event("seek", function()
+    if state.new_file_flag then
+        state.new_file_flag = false
+        return
+    end
     if user_opts.osc_on_seek then
         show_osc()
     end
@@ -3846,11 +3850,6 @@ end)
 mp.observe_property("seeking", "native", function(_, seeking)
     if user_opts.seek_resets_hidetimeout then
         reset_timeout()
-    end
-
-    if state.new_file_flag then
-        state.new_file_flag = false
-        return
     end
 end)
 mp.observe_property("fullscreen", "bool", function(_, val)
