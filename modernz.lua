@@ -3838,6 +3838,11 @@ mp.observe_property("chapter-list", "native", function(_, list)
     update_duration_watch()
     request_init()
 end)
+mp.register_event("seek", function()
+    if user_opts.osc_on_seek then
+        show_osc()
+    end
+end)
 mp.observe_property("seeking", "native", function(_, seeking)
     if user_opts.seek_resets_hidetimeout then
         reset_timeout()
@@ -3846,12 +3851,6 @@ mp.observe_property("seeking", "native", function(_, seeking)
     if state.new_file_flag then
         state.new_file_flag = false
         return
-    end
-
-    if seeking and user_opts.osc_on_seek then
-        mp.register_event("seek", show_osc) -- show OSC while seeking
-    else
-        mp.unregister_event(show_osc) -- remove event when seeking stops
     end
 end)
 mp.observe_property("fullscreen", "bool", function(_, val)
