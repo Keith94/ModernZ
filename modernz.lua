@@ -554,8 +554,8 @@ end
 
 -- internal states, do not touch
 local state = {
-    showtime = nil,                         -- time of last invocation (last mouse move)
-    touchtime = nil,                        -- time of last invocation (last touch event)
+    showtime = mp.get_time(),               -- time of last invocation (last mouse move)
+    touchtime = mp.get_time(),              -- time of last invocation (last touch event)
     touchpoints = {},                       -- current touch points
     osc_visible = false,
     anistart = nil,                         -- time when the animation started
