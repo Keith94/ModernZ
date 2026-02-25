@@ -77,15 +77,15 @@ ModernZ supports mpv's built-in console/select ([v0.40+](https://github.com/mpv-
 
 4. **Folder Structure** [[mpv manual](https://mpv.io/manual/master/#files)]
    ```
-   mpv/
-   ├── fonts/
-   │   ├── fluent-system-icons.ttf
-   │   └── material-design-icons.ttf
-   ├── script-opts/
-   │   └── modernz.conf
-   └── scripts/
-   	   ├── modernz.lua
-   	   └── thumbfast.lua (optional)
+   📁 mpv/
+   ├── 📁 fonts/
+   │   ├── 📄 fluent-system-icons.ttf
+   │   └── 📄 material-design-icons.ttf
+   ├── 📁 script-opts/
+   │   └── 📄 modernz.conf
+   └── 📁 scripts/
+   	   ├── 📄 modernz.lua
+   	   └── 📄 thumbfast.lua (optional)
    ```
 
 ## Configuration

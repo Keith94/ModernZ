@@ -37,11 +37,11 @@ Simply place [pip_lite.lua](./pip_lite.lua) in the corresponding mpv scripts fol
 - Mac: `~/.config/mpv/scripts/` or `/Users/USERNAME/.config/mpv/scripts/`
 
 ```
-mpv
-├── script-opts
-│   └── pip_lite.conf
-└── scripts
-    └── pip_lite.lua
+📁 mpv/
+├── 📁 script-opts/
+│   └── 📄 pip_lite.conf
+└── 📁 scripts/
+    └── 📄 pip_lite.lua
 ```
 
 > [!NOTE]    

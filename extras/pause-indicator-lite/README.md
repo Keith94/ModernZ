@@ -53,13 +53,13 @@ Simply place `pause_indicator_lite.lua` in the corresponding mpv scripts folder 
 > More information about mpv files locations can be found  [here](https://mpv.io/manual/master/#files)
 
 ```
-mpv
-├── fonts/
-│   └── fluent-system-icons.ttf (optional) [required for fluent_icons]
-├── script-opts
-│   └── pause_indicator_lite.conf
-└── scripts
-    └── pause_indicator_lite.lua
+📁 mpv/
+├── 📁 fonts/
+│   └── 📄 fluent-system-icons.ttf (optional) [required for fluent_icons]
+├── 📁 script-opts/
+│   └── 📄 pause_indicator_lite.conf
+└── 📁 scripts/
+    └── 📄 pause_indicator_lite.lua
 ```
 
 ### Notes
