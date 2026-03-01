@@ -3668,8 +3668,8 @@ local function render()
     if state.showtime ~= nil and get_hidetimeout() >= 0 then
         local timeout = state.showtime + (get_hidetimeout() / 1000) - now
         if timeout <= 0 and get_touchtimeout() <= 0 then
-            if state.active_element == nil and not mouse_over_osc or not user_opts.osc_keep_with_cursor and not state.playing_and_seeking then
-                hide_osc()
+            if state.active_element == nil and not mouse_over or not user_opts.osc_keep_with_cursor and not state.playing_and_seeking then
+                hide_fn()
             end
         else
             -- the timer is only used to recheck the state and to possibly run
