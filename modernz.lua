@@ -3355,12 +3355,14 @@ local function cache_state(_, st)
 end
 
 local function mouse_leave()
-    state.touchtime = nil
-    if get_hidetimeout() >= 0 and get_touchtimeout() <= 0 then
-        if not state.pause_osc_locked then
+    local hide_timeout = get_hidetimeout()
+    if hide_timeout >= 0 and get_touchtimeout() <= 0 then
+        local now = mp.get_time()
+        local elapsed = hide_timeout / 1000
+        if not state.pause_osc_locked and state.showtime and now - state.showtime >= elapsed then
             hide_osc()
         end
-        if user_opts.independent_zones then
+        if user_opts.independent_zones and state.wc_showtime and now - state.wc_showtime >= elapsed then
             hide_wc()
         end
     end
