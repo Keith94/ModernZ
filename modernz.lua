@@ -80,9 +80,10 @@ local user_opts = {
     window_title_font_size = 26,           -- window title font size
     window_controls = true,                -- show window controls (close, minimize, maximize) in borderless/fullscreen
 
-    -- Subtitle display settings
-    raise_subtitles = true,                -- raise subtitles above the OSC when shown
-    raise_subtitle_amount = 125,           -- amount by which subtitles are raised when the OSC is shown (in pixels)
+    -- Subtitle and OSD display settings
+    sub_margins = true,                    -- raise subtitles above the OSC when shown
+    osd_margins = false,                   -- adjust OSD to not overlap with OSC
+    dynamic_margins = true,                -- update margins dynamically with OSC visibility
 
     -- Buttons display and functionality
     subtitles_button = true,               -- show the subtitles menu button
@@ -277,6 +278,10 @@ local user_opts = {
 
     -- screenshot button mouse actions
     screenshot_mbtn_left_command = "osd-msg screenshot subtitles",
+
+    -- DEPRECATED options
+    raise_subtitles = false,               -- DEPRECATED: use sub_margins and dynamic_margins instead
+    raise_subtitle_amount = false,         -- DEPRECATED: use sub_margins and dynamic_margins instead
 }
 
 mp.observe_property("osc", "bool", function(name, value) if value == true then mp.set_property("osc", "no") end end)
@@ -570,7 +575,6 @@ local state = {
     touchingprogressbar = false,            -- if the mouse is touching the progress bar
     initialborder = mp.get_property("border"),
     playtime_hour_force_init = false,       -- used to force request_init() once
-    playtime_nohour_force_init = false,     -- used to force request_init() once
     playing_and_seeking = false,
     persistent_progress_toggle = user_opts.persistentprogress,
     user_subpos = mp.get_property_number("sub-pos") or 100,
@@ -832,15 +836,70 @@ local function cache_enabled()
     return state.cache_state and #state.cache_state["seekable-ranges"] > 0
 end
 
-local function update_margins()
-    local margins = osc_param.video_margins
+local function set_margin_offset(prop, offset)
+    if offset > 0 then
+        if not state[prop] then
+            state[prop] = mp.get_property_number(prop)
+        end
+        mp.set_property_number(prop, state[prop] + offset)
+    elseif state[prop] then
+        mp.set_property_number(prop, state[prop])
+        state[prop] = nil
+    end
+end
 
-    -- Don't use margins if it's visible only temporarily.
-    if not state.osc_visible or get_hidetimeout() >= 0 or
-       (state.fullscreen and not user_opts.showfullscreen) or
-       (not state.fullscreen and not user_opts.showwindowed)
-    then
-        margins = {l = 0, r = 0, t = 0, b = 0}
+local function reset_margins()
+    -- restore subtitle position if it was changed
+    if state.osc_adjusted_subpos ~= nil then
+        mp.set_property_number("sub-pos", state.user_subpos)
+        state.osc_adjusted_subpos = nil
+    end
+    set_margin_offset("osd-margin-y", 0)
+end
+
+local function update_margins()
+    local use_margins = get_hidetimeout() < 0 or user_opts.dynamic_margins
+    local top_vis    = state.wc_visible
+    local bottom_vis = state.osc_visible
+    local margins = {
+        l = 0,
+        r = 0,
+        t = (use_margins and top_vis)    and osc_param.video_margins.t or 0,
+        b = (use_margins and bottom_vis) and osc_param.video_margins.b or 0,
+    }
+
+    -- raise amount is based on OSC height
+    if user_opts.sub_margins and mp.get_property_native("sid") then
+        if margins.b > 0 then
+            local raise_percent = margins.b * 100
+            -- only raise if subs are low enough that they would overlap the OSC
+            if state.user_subpos >= (100 - raise_percent) then
+                local adjusted = math.floor((1 - margins.b) * 100)
+                if adjusted < 0 then adjusted = state.user_subpos end
+                state.osc_adjusted_subpos = adjusted
+                mp.set_property_number("sub-pos", adjusted)
+            else
+                -- sub pos is high; do nothing
+                state.osc_adjusted_subpos = nil
+            end
+        else
+            -- restore original sub position
+            if state.osc_adjusted_subpos ~= nil then
+                mp.set_property_number("sub-pos", state.user_subpos)
+                state.osc_adjusted_subpos = nil
+            end
+        end
+    end
+
+    if user_opts.osd_margins then
+        local align = mp.get_property("osd-align-y")
+        local osd_margin = 0
+        if align == "top" and top_vis then
+            osd_margin = margins.t
+        elseif align == "bottom" and bottom_vis then
+            osd_margin = margins.b
+        end
+        set_margin_offset("osd-margin-y", osd_margin * osc_param.playresy)
     end
 
     mp.set_property_native("user-data/osc/margins", margins)
@@ -1393,7 +1452,8 @@ local function render_elements(master_ass, osc_vis, wc_vis)
 
                             if osd_w then
                                 local hover_sec = 0
-                                if mp.get_property_number("duration") then hover_sec = mp.get_property_number("duration") * sliderpos / 100 end
+                                local hover_dur = mp.get_property_number("duration")
+                                if hover_dur then hover_sec = hover_dur * sliderpos / 100 end
                                 local thumbPad = user_opts.thumbnail_border
                                 local thumbMarginX = 18 / r_w
                                 local thumbMarginY = user_opts.time_font_size + thumbPad + 2 / r_h
@@ -1559,9 +1619,7 @@ local function render_persistentprogressbar(master_ass)
 
                 local elem_ass = assdraw.ass_new()
                 elem_ass:merge(style_ass)
-                if element.type ~= "button" then
-                    elem_ass:merge(element.static_ass)
-                end
+                elem_ass:merge(element.static_ass)
 
                 -- draw pos marker
                 draw_seekbar_progress(element, elem_ass)
@@ -1838,7 +1896,7 @@ local function setup_bg_elements(posX, posY, osc_w, osc_alpha3, wc_alpha3)
     lo.alpha[3] = osc_alpha3
 
     local top_titlebar = window_controls_enabled() and (user_opts.show_window_title or user_opts.window_controls)
-    if ((user_opts.window_top_bar == "yes" or not (state.border and state.title_bar)) or state.fullscreen) and top_titlebar then
+    if top_titlebar then
         new_element("window_bar_alpha_bg", "box")
         lo = add_layout("window_bar_alpha_bg")
         lo.geometry = {x = posX, y = -100, an = 7, w = osc_w, h = -1}
@@ -2502,62 +2560,20 @@ layouts["modern-image"] = function ()
     end
 end
 
-local function adjust_subtitles(visible)
-    if not mp.get_property_native("sid") then return end
-
-    local scale = state.fullscreen and user_opts.scalefullscreen or user_opts.scalewindowed
-
-    if visible and user_opts.raise_subtitles and state.osc_visible then
-        local w, h = mp.get_osd_size()
-        if h > 0 then
-            local raise_factor = user_opts.raise_subtitle_amount
-
-            -- adjust for scale
-            if scale > 1 then
-                raise_factor = raise_factor * (1 + (scale - 1) * 0.2)
-            elseif scale < 1 then
-                raise_factor = raise_factor * (0.8 + (scale - 0.5) * 0.5)
-            end
-
-            -- raise percentage
-            local raise_percent = (raise_factor / osc_param.playresy) * 100
-
-            -- don't adjust if user's sub-pos is higher than the raise factor
-            if state.user_subpos >= (100 - raise_percent) then
-                local adjusted = math.floor((osc_param.playresy - raise_factor) / osc_param.playresy * 100)
-                if adjusted < 0 then adjusted = state.user_subpos end
-
-                state.osc_adjusted_subpos = adjusted
-                mp.set_property_number("sub-pos", adjusted)
-            else
-                state.osc_adjusted_subpos = nil
-            end
-        end
-    elseif user_opts.raise_subtitles then
-        -- restore user's original subtitle position
-        if state.user_subpos then
-            mp.set_property_number("sub-pos", state.user_subpos)
-        end
-        state.osc_adjusted_subpos = nil
-    end
-end
-
-
-local function set_bar_visible(visible_key, visible, with_margins, on_change)
+local function set_bar_visible(visible_key, visible)
     if state[visible_key] ~= visible then
         state[visible_key] = visible
-        if with_margins then update_margins() end
-        if on_change then on_change() end
+        update_margins()
     end
     request_tick()
 end
 
 local function osc_visible(visible)
-    set_bar_visible("osc_visible", visible, true, function() adjust_subtitles(true) end)
+    set_bar_visible("osc_visible", visible)
 end
 
 local function wc_visible(visible)
-    set_bar_visible("wc_visible", visible, false)
+    set_bar_visible("wc_visible", visible)
 end
 
 local function command_callback(command)
@@ -2857,7 +2873,7 @@ local function osc_init()
     end
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
-        local volume = mp.get_property_number("volume", 0) or 0
+        local volume = mp.get_property_number("volume", 0)
         -- show only one decimal, if decimals exist
         volume = volume % 1 == 0 and string.format("%.0f", volume) or string.format("%.1f", volume)
         return state.mute and (volume .. " (" .. locale.muted .. ")") or volume
@@ -2907,16 +2923,15 @@ local function osc_init()
 
     -- zoom control
     -- zoom out icon
-    local current_zoom = mp.get_property_number("video-zoom")
     ne = new_element("zoom_out_icon", "button")
     ne.visible = (osc_param.playresx >= 400)
     ne.content = icons.zoom_out
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = user_opts.tooltip_hints and locale.zoom_out or ""
-    ne.eventresponder["mbtn_left_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, current_zoom - 0.05)) end
+    ne.eventresponder["mbtn_left_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, mp.get_property_number("video-zoom", 0) - 0.05)) end
     ne.eventresponder["mbtn_right_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", 0) end
-    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, current_zoom + 0.05)) end
-    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, current_zoom - 0.05)) end
+    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, mp.get_property_number("video-zoom", 0) + 0.05)) end
+    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, mp.get_property_number("video-zoom", 0) - 0.05)) end
 
     -- zoom slider
     ne = new_element("zoom_control", "slider")
@@ -2936,8 +2951,8 @@ local function osc_init()
     ne.eventresponder["mbtn_left_down"] = function (element) mp.commandv("osd-msg", "set", "video-zoom", get_slider_value(element)) end
     ne.eventresponder["reset"] = function (element) element.state.lastseek = nil end
     ne.eventresponder["mbtn_right_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", 0) end
-    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, current_zoom + 0.05)) end
-    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, current_zoom - 0.05)) end
+    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, mp.get_property_number("video-zoom", 0) + 0.05)) end
+    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, mp.get_property_number("video-zoom", 0) - 0.05)) end
 
     -- zoom in icon
     ne = new_element("zoom_in_icon", "button")
@@ -2945,10 +2960,10 @@ local function osc_init()
     ne.content = icons.zoom_in
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = user_opts.tooltip_hints and locale.zoom_in or ""
-    ne.eventresponder["mbtn_left_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, current_zoom + 0.05)) end
+    ne.eventresponder["mbtn_left_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, mp.get_property_number("video-zoom", 0) + 0.05)) end
     ne.eventresponder["mbtn_right_up"] = function () mp.commandv("osd-msg", "set", "video-zoom", 0) end
-    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, current_zoom + 0.05)) end
-    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, current_zoom - 0.05)) end
+    ne.eventresponder["wheel_up_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.min(user_opts.zoom_in_max, mp.get_property_number("video-zoom", 0) + 0.05)) end
+    ne.eventresponder["wheel_down_press"] = function () mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, mp.get_property_number("video-zoom", 0) - 0.05)) end
 
     visible_min_width = 550 - outeroffset
     --tog_fullscreen
@@ -3270,7 +3285,6 @@ local function osc_init()
             if hour_or_more ~= state.playtime_hour_force_init then
                 request_init()
                 state.playtime_hour_force_init = hour_or_more
-                state.playtime_nohour_force_init = not hour_or_more
             end
         end
 
@@ -3333,9 +3347,9 @@ local function hide_osc()
     if thumbfast.width ~= 0 and thumbfast.height ~= 0 then
         mp.commandv("script-message-to", "thumbfast", "clear")
     end
-    -- when disabled, restore subtitles before hide_bar wipes the overlay
+    -- reset margins before hide_bar wipes the overlay
     if not state.enabled then
-        adjust_subtitles(false)
+        reset_margins()
     end
     hide_bar("osc", "osc_visible", "anitype", osc_visible)
     -- couple wc with osc when not independent
@@ -3355,14 +3369,11 @@ local function cache_state(_, st)
 end
 
 local function mouse_leave()
-    local hide_timeout = get_hidetimeout()
-    if hide_timeout >= 0 and get_touchtimeout() <= 0 then
-        local now = mp.get_time()
-        local elapsed = hide_timeout / 1000
-        if not state.pause_osc_locked and state.showtime and now - state.showtime >= elapsed then
+    if get_hidetimeout() >= 0 and get_touchtimeout() <= 0 then
+        if not state.pause_osc_locked then
             hide_osc()
         end
-        if user_opts.independent_zones and state.wc_showtime and now - state.wc_showtime >= elapsed then
+        if user_opts.independent_zones then
             hide_wc()
         end
     end
@@ -3627,12 +3638,13 @@ local function render()
 
     -- autohide
     local function run_autohide(showtime_key, hide_fn, input_areas)
-        if state[showtime_key] == nil or get_hidetimeout() < 0 then return end
+        local hide_timeout = get_hidetimeout()
+        if state[showtime_key] == nil or hide_timeout < 0 then return end
         -- keeponpause + independent_zones: bottom bar is locked, top bar hides normally
         if state.pause_osc_locked and showtime_key == "showtime" then return end
-        local timeout = state[showtime_key] + (get_hidetimeout() / 1000) - now
+        local timeout = state[showtime_key] + (hide_timeout / 1000) - now
         if timeout <= 0 and get_touchtimeout() <= 0 then
-            if (state.active_element == nil and not mouse_in_area(input_areas)) or (state.active_element == nil and not user_opts.osc_keep_with_cursor) then
+            if state.active_element == nil and (not mouse_in_area(input_areas) or not user_opts.osc_keep_with_cursor) then
                 hide_fn()
             end
         else
@@ -3784,6 +3796,10 @@ local function set_tick_delay(_, display_fps)
     tick_delay = 1 / display_fps
 end
 
+mp.register_event("shutdown", function()
+    reset_margins()
+    mp.del_property("user-data/osc")
+end)
 mp.register_event("file-loaded", function()
     is_image() -- check if file is an image
     state.new_file_flag = true
@@ -3825,7 +3841,6 @@ end)
 mp.observe_property("fullscreen", "bool", function(_, val)
     state.fullscreen = val
     state.marginsREQ = true
-    adjust_subtitles(state.osc_visible)
     request_init_resize()
 end)
 mp.observe_property("border", "bool", function(_, val)
@@ -3858,7 +3873,6 @@ mp.observe_property("osd-dimensions", "native", function()
     -- (we could use the value instead of re-querying it all the time, but then
     --  we might have to worry about property update ordering)
     request_init_resize()
-    adjust_subtitles(state.osc_visible)
 end)
 mp.observe_property("osd-scale-by-window", "native", request_init_resize)
 mp.observe_property("touch-pos", "native", handle_touch)
@@ -3874,7 +3888,6 @@ mp.observe_property("loop-file", "bool", function(_, val)
 end)
 mp.observe_property("sub-pos", "native", function(_, value)
     if value == nil then return end
-
     if state.osc_adjusted_subpos == nil or value ~= state.osc_adjusted_subpos then
         state.user_subpos = value
     end
@@ -4120,6 +4133,10 @@ local function validate_user_opts()
     if user_opts.keeponpause and not user_opts.showonpause then
         msg.warn("keeponpause requires showonpause. Setting showonpause=yes.")
         user_opts.showonpause = true
+    end
+
+    if user_opts.raise_subtitles or user_opts.raise_subtitle_amount then
+        msg.warn("raise_subtitles / raise_subtitle_amount are deprecated. Use sub_margins=yes and dynamic_margins=yes.")
     end
 end
 
