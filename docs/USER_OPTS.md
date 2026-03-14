@@ -30,24 +30,23 @@ Create `modernz.conf` in your mpv script-opts directory:
 
 ### OSC behaviour and scaling
 
-| Option                  | Value | Description                                                                      |
-| ----------------------- | ----- | -------------------------------------------------------------------------------- |
-| hidetimeout             | 2000  | time (in ms) before OSC hides if no mouse movement                               |
-| fadeduration            | 200   | fade-out duration (in ms), set to `"0"` for no fade                              |
-| fadein                  | no    | whether to enable fade-in effect                                                 |
-| minmousemove            | 0     | minimum mouse movement (in pixels) required to show OSC                          |
-| bottomhover             | yes   | show OSC only when hovering at the bottom                                        |
-| bottomhover_zone        | 130   | height of hover zone for bottomhover (in pixels)                                 |
-| tophover_zone           | 40    | height of hover zone for top bar when `independent_zones` is enabled (in pixels) |
-| independent_zones       | yes   | show/hide top and bottom bar independently based on hover area                   |
-| osc_on_seek             | no    | show OSC when seeking                                                            |
-| osc_on_start            | no    | show OSC/window controls on start of every file (`no`, `bottom`, `top`, `both`)  |
-| osc_keep_with_cursor    | yes   | keep OSC visible if mouse cursor is within OSC boundaries                        |
-| mouse_seek_pause        | yes   | pause video while seeking with mouse move (on button hold)                       |
-| force_seek_tooltip      | no    | force show seekbar tooltip on mouse drag, even if not hovering seekbar           |
-| vidscale                | auto  | scale osc with the video. (set to `"no"` to disable)                             |
-| scalewindowed           | 1.0   | osc scale factor when windowed                                                   |
-| scalefullscreen         | 1.0   | osc scale factor when fullscreen                                                 |
+| Option                  | Value  | Description                                                                      |
+| ----------------------- | ------ | -------------------------------------------------------------------------------- |
+| hidetimeout             | 2000   | time (in ms) before OSC hides if no mouse movement                               |
+| fadeduration            | 200    | fade-out duration (in ms), set to `"0"` for no fade                              |
+| fadein                  | no     | whether to enable fade-in effect                                                 |
+| minmousemove            | 0      | minimum mouse movement (in pixels) required to show OSC                          |
+| zones_hover_mode        | always | mode for showing OSC/WC on mouse move: `always`, `zones`, `independent`          |
+| bottomhover_zone        | 130    | height of the bottom hover zone (in pixels)                                      |
+| tophover_zone           | 40     | height of the top hover zone (in pixels)                                         |
+| osc_on_seek             | no     | show OSC when seeking                                                            |
+| osc_on_start            | no     | show OSC/window controls on start of every file (`no`, `bottom`, `top`, `both`)  |
+| osc_keep_with_cursor    | yes    | keep OSC visible if mouse cursor is within OSC boundaries                        |
+| mouse_seek_pause        | yes    | pause video while seeking with mouse move (on button hold)                       |
+| force_seek_tooltip      | no     | force show seekbar tooltip on mouse drag, even if not hovering seekbar           |
+| vidscale                | auto   | scale osc with the video. (set to `"no"` to disable)                             |
+| scalewindowed           | 1.0    | osc scale factor when windowed                                                   |
+| scalefullscreen         | 1.0    | osc scale factor when fullscreen                                                 |
 
 ### Elements display
 
@@ -104,9 +103,9 @@ So, to control the raise amount of subtitles, adjust your `osc_height` and `fade
 | audio_tracks_button        | yes           | show the audio tracks menu button                                                                                  |
 | jump_buttons               | yes           | show "jump forward/backward 10 seconds" buttons                                                                    |
 | jump_amount                | 10            | change the jump amount in seconds                                                                                  |
-| jump_more_amount           | 60            | change the jump amount in seconds when right-clicking jump buttons and shift-clicking chapter skip buttons         |
+| jump_more_amount           | 60            | change the jump amount in seconds on right click                                                                   |
 | jump_icon_number           | yes           | show different icon for `5`, `10`, or `30` second jumps                                                            |
-| jump_mode                  | relative      | seek mode for jump buttons                                                                                         |
+| jump_mode                  | relative      | seek mode for jump buttons: `"relative"` or `"exact"`                                                              |
 | jump_softrepeat            | yes           | enable continuous jumping when holding down seek buttons                                                           |
 | chapter_skip_buttons       | no            | show the skip back and forward (chapter) buttons                                                                   |
 | chapter_softrepeat         | yes           | enable continuous skipping when holding down chapter skip buttons                                                  |
@@ -114,8 +113,8 @@ So, to control the raise amount of subtitles, adjust your `osc_height` and `fade
 | volume_control             | yes           | show mute button and volume slider                                                                                 |
 | volume_control_type        | linear        | volume scale type: `"linear"` or `"logarithmic"`                                                                   |
 | playlist_button            | yes           | show playlist button: Left-click for simple playlist, Right-click for interactive playlist                         |
-| hide_empty_playlist_button | yes           | hide playlist button when no playlist exists                                                                       |
-| gray_empty_playlist_button | yes           | gray out the playlist button when no playlist exists                                                               |
+| hide_empty_playlist_button | no            | hide playlist button when no playlist exists                                                                       |
+| gray_empty_playlist_button | no            | gray out the playlist button when no playlist exists                                                               |
 | download_button            | yes           | show download button on web videos (requires yt-dlp and ffmpeg)                                                    |
 | download_path              | ~~desktop/mpv | default download directory for videos. [Learn more about setting paths here](https://mpv.io/manual/master/#paths). |
 | screenshot_button          | no            | show screenshot button                                                                                             |
