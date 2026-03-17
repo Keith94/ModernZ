@@ -73,6 +73,7 @@ local user_opts = {
     time_font_size = 16,                   -- font size of the time display
 
     tooltip_font_size = 14,                -- tooltips font size
+    speed_font_size = 16,                  -- speed button font size
 
     -- Title bar settings
     show_window_title = false,             -- show window title in borderless/fullscreen mode
@@ -100,7 +101,7 @@ local user_opts = {
 
     volume_control = true,                 -- show mute button and volume slider
     volume_control_type = "linear",        -- volume scale type: "linear" or "logarithmic"
-    playlist_button = true,                -- show playlist button: Left-click for simple playlist, Right-click for interactive playlist
+    playlist_button = true,                -- show playlist button
     hide_empty_playlist_button = false,    -- hide playlist button when no playlist exists
     gray_empty_playlist_button = false,    -- gray out the playlist button when no playlist exists
 
@@ -452,10 +453,12 @@ if external then
 end
 
 local locale
-local rtl = false                           -- locale language direction (true if RTL)
+local rtl = false                  -- locale language direction (true if RTL)
+local rtl_reset = "{\\rDefault}"   -- cached ASS reset tag, includes \\fe-1 for RTL
 local function set_osc_locale()
     locale = language[user_opts.language] or language["en"]
     rtl = (locale.lang_direction or "ltr"):lower() == "rtl"
+    rtl_reset = rtl and "{\\rDefault\\fe-1}" or "{\\rDefault}"
 end
 
 local function contains(list, item)
@@ -514,6 +517,7 @@ local function set_osc_styles()
         time = "{\\blur0\\bord0\\1c&H" .. osc_color_convert(user_opts.time_color) .. "&\\3c&H0&\\fs" .. user_opts.time_font_size .. "\\fn" .. user_opts.font .. "}",
         cache = "{\\blur0\\bord0\\1c&H" .. osc_color_convert(user_opts.cache_info_color) .. "&\\3c&H0&\\fs" .. user_opts.cache_info_font_size .. "\\fn" .. user_opts.font .. "}",
         tooltip = "{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0&\\fs" .. user_opts.tooltip_font_size .. "\\fn" .. user_opts.font .. "}",
+        speed = "{\\blur0\\bord0\\1c&H" .. osc_color_convert(user_opts.side_buttons_color) .. "&\\3c&H0&\\fs" .. user_opts.speed_font_size .. "\\fn" .. user_opts.font .. "}",
         volumebar_bg = "{\\blur0\\bord0\\1c&H999999&}",
         volumebar_fg = "{\\blur1\\bord1\\1c&H" .. osc_color_convert(user_opts.side_buttons_color) .. "&}",
         control_1 = "{\\blur0\\bord0\\1c&H" .. osc_color_convert(user_opts.playpause_color) .. "&\\3c&HFFFFFF&\\fs" .. playpause_size .. "\\fn" .. icons.iconfont .. "}",
@@ -730,6 +734,18 @@ local function estimate_text_width(text, style)
 
     text_width_cache[cache_key] = width
     return width
+end
+
+-- width of the time codes element
+local function get_time_codes_width(show_hours, show_remhours)
+    local t_fmt  = (show_hours and "00:00:00" or "00:00") .. (state.tc_ms and ".000" or "")
+    local rt_fmt = (show_remhours and "00:00:00" or "00:00") .. (state.tc_ms and ".000" or "")
+    local prefix = state.tc_left_rem and (user_opts.unicodeminus and UNICODE_MINUS or "-") or ""
+    local w = estimate_text_width(prefix .. rt_fmt .. " / " .. t_fmt, osc_styles.time)
+    if w == 0 then
+        w = 80 + (state.tc_ms and 50 or 0) + (state.tc_left_rem and 15 or 0) + (show_hours and 20 or 0) + (show_remhours and 20 or 0)
+    end
+    return w
 end
 
 -- returns hitbox spanning coordinates (top left, bottom right corner)
@@ -1616,7 +1632,7 @@ local function render_elements(master_ass, osc_vis, wc_vis)
                     end
 
                     elem_ass:new_event()
-                    elem_ass:append("{\\rDefault" .. (rtl and "\\fe-1" or "") .. "}")
+                    elem_ass:append(rtl_reset)
                     elem_ass:pos(tx, ty)
                     elem_ass:an(an)
                     elem_ass:append(element.tooltip_style)
@@ -2142,11 +2158,7 @@ layouts["modern"] = function ()
         - (auto_hide_volbar and 67 or 0) -- window width with audio track and elements
         - (audio_track and not user_opts.volume_control and 115 or 0) -- audio track with no elements
         - (not audio_track and 12 or 0) -- remove extra padding
-    local time_codes_width = 80
-        + (state.tc_ms and 50 or 0)
-        + (state.tc_left_rem and 15 or 0)
-        + (show_hours and 20 or 0)
-        + (show_remhours and 20 or 0)
+    local time_codes_width = get_time_codes_width(show_hours, show_remhours)
     local narrow_win = osc_param.playresx < (
         user_opts.portrait_window_trigger
         - outeroffset
@@ -2210,8 +2222,8 @@ layouts["modern"] = function ()
 
     if speed_button then
         lo = add_layout("speed")
-        lo.geometry = {x = end_x, y = refY - 35, an = 5, w = 24, h = 24}
-        lo.style = osc_styles.time
+        lo.geometry = {x = end_x, y = refY - 35, an = 5, w = 42, h = 24}
+        lo.style = osc_styles.speed
         lo.visible = (osc_param.playresx >= 600 - outeroffset)
         end_x = end_x - 45
     end
@@ -2304,9 +2316,7 @@ layouts["modern-compact"] = function ()
     local dur = mp.get_property_number("duration", 0)
     local show_hours = mp.get_property_number("playback-time", 0) >= 3600 or user_opts.time_format ~= "dynamic"
     local show_remhours = (state.tc_left_rem and remsec >= 3600) or (not state.tc_left_rem and dur >= 3600) or user_opts.time_format ~= "dynamic"
-    local time_codes_width =
-        80 + (state.tc_ms and 50 or 0) + (state.tc_left_rem and 15 or 0) + (show_hours and 20 or 0) +
-        (show_remhours and 20 or 0)
+    local time_codes_width = get_time_codes_width(show_hours, show_remhours)
 
     -- OSC title
     local title_w = (chapter_index and (osc_geo.w - 50) or (osc_geo.w - 50 - time_codes_width))
@@ -2451,7 +2461,7 @@ layouts["modern-compact"] = function ()
     if elements.speed.visible then
         lo = add_layout("speed")
         lo.geometry = {x = end_x, y = refY - 35, an = 5, w = 24, h = 24}
-        lo.style = osc_styles.time
+        lo.style = osc_styles.speed
         end_x = end_x - 55
     end
 
@@ -2641,7 +2651,6 @@ local function format_time(seconds)
     end
 end
 
--- build cache seek ranges from state
 local function build_cache_seek_ranges()
     if not user_opts.seekrange or not cache_enabled() then return nil end
     local duration = mp.get_property_number("duration")
