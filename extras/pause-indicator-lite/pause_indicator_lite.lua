@@ -22,7 +22,7 @@ local options = {
     icon_color = "#FFFFFF",               -- icon fill color
     icon_border_color = "#111111",        -- icon border color
     icon_border_width = 1.5,              -- icon border width
-    icon_opacity = 30,                    -- icon opacity (0-100)
+    icon_opacity = 75,                    -- icon opacity (0-100)
 
     -- pause icon
     rectangles_width = 20,                -- width of rectangles
@@ -43,6 +43,17 @@ local options = {
     themed_icons = false,                 -- requires fonts/modernz-icons.ttf
     themed_icon_size = 80,                -- themed icon size
 
+    -- animation options
+    anim_enabled = true,                  -- enable fade/scale animations
+    anim_in_duration = 0.15,              -- fade/scale-in duration (seconds)
+    anim_out_duration = 0.15,             -- fade-out duration (seconds)
+    anim_scale_from = 70,                 -- starting scale % for the scale-in
+
+    -- circle background (behind pause/play icon)
+    circle_enabled = true,               -- show a circle behind the icon
+    circle_radius = 60,                  -- radius of the circle
+    circle_color = "#111111",            -- circle fill color
+
     -- mute options
     mute_indicator = false,               -- show a mute indicator
     mute_indicator_pos = "top_right",     -- position of mute indicator. top_left, top_right, top_center
@@ -52,19 +63,16 @@ local options = {
 }
 
 local msg = require "mp.msg"
+local assdraw = require "mp.assdraw"
 require 'mp.options'.read_options(options, "pause_indicator_lite")
 
 local state = {
     indicator_overlay = mp.create_osd_overlay("ass-events"),
     flash_overlay = mp.create_osd_overlay("ass-events"),
     mute_overlay = mp.create_osd_overlay("ass-events"),
-    aspect = 0,
-    indicator_pos = 5,
-    mute_pos = 9,
+    virt_w = 0,
     indicator_visible = false,
     mute_visible = false,
-    indicator_timer = nil,
-    flash_timer = nil,
     paused = false,
     toggled = false,
     eof = false,
@@ -111,7 +119,7 @@ end
 -- convert percentage opacity (0-100) to ASS alpha values
 local function convert_opacity(value)
     value = math.max(0, math.min(100, value))
-    return string.format("%02X", (255 - (value * 2.55)))
+    return string.format("%02X", math.floor(255 - (value * 2.55)))
 end
 
 local icon_style = {
@@ -122,60 +130,122 @@ local icon_style = {
     font = icon_theme.font,
 }
 
--- indicator position
-local function icon_pos(pos_opt)
-    local pos = {
-        top_left    = 7, top_center    = 8, top_right    = 9,
-        middle_left = 4, middle_center = 5, middle_right = 6,
-        bottom_left = 1, bottom_center = 2, bottom_right = 3,
-    }
-    return pos[(pos_opt or ""):lower()] or 5
+local VIRT_H = 720  -- fixed virtual ASS coordinate height (mpv overlay default)
+
+-- lock overlay canvas to virtual coordinate system so slot_center coords are accurate
+for _, ov in ipairs({state.indicator_overlay, state.flash_overlay, state.mute_overlay}) do
+    ov.res_y = VIRT_H
 end
 
-state.indicator_pos = icon_pos(options.indicator_pos)
-state.mute_pos = icon_pos(options.mute_indicator_pos)
+-- {xi, yi}: xi 1=left 2=center 3=right, yi 1=bottom 2=middle 3=top
+local pos_slots = {
+    top_left    = {1, 3}, top_center    = {2, 3}, top_right    = {3, 3},
+    middle_left = {1, 2}, middle_center = {2, 2}, middle_right = {3, 2},
+    bottom_left = {1, 1}, bottom_center = {2, 1}, bottom_right = {3, 1},
+}
+state.indicator_pos = pos_slots[(options.indicator_pos or ""):lower()] or pos_slots["middle_center"]
+state.mute_pos      = pos_slots[(options.mute_indicator_pos or ""):lower()] or pos_slots["top_right"]
 
 -- prevent duplicate positions
 if state.indicator_pos == state.mute_pos then
-    state.mute_pos = (state.mute_pos % 9) + 1
+    state.mute_pos = pos_slots["top_left"]
 end
 
--- pause icon
-local function draw_rectangles()
+local function slot_center(slot, margin)
+    margin = margin or (options.circle_enabled and (options.circle_radius + 10) or 40)
+    local x_vals = {margin, math.floor(state.virt_w / 2), state.virt_w - margin}
+    local y_vals = {VIRT_H - margin, math.floor(VIRT_H / 2), margin}
+    return x_vals[slot[1]], y_vals[slot[2]]
+end
+
+-- append a scaled circle background event to an ass object, centered at cx,cy
+local function append_circle(ass, cx, cy, alpha, sc)
+    local r_sc = math.floor(options.circle_radius * sc)
+    local k    = r_sc * 0.5523
+    ass:new_event()
+    ass:append(string.format("{\\rDefault\\an7\\pos(%d,%d)\\1a&H%s&\\3a&H%s&\\bord0\\1c&H%s&}",
+        cx-r_sc, cy-r_sc, alpha, alpha, convert_color(options.circle_color)))
+    ass:draw_start()
+    ass:move_to(r_sc, 0)
+    ass:bezier_curve(r_sc+k, 0,      r_sc*2, r_sc-k,  r_sc*2, r_sc)
+    ass:bezier_curve(r_sc*2, r_sc+k, r_sc+k, r_sc*2,  r_sc,   r_sc*2)
+    ass:bezier_curve(r_sc-k, r_sc*2, 0,      r_sc+k,  0,      r_sc)
+    ass:bezier_curve(0,      r_sc-k, r_sc-k, 0,       r_sc,   0)
+    ass:draw_stop()
+end
+
+-- draw an indicator icon (themed font glyph or drawn shape) with optional circle background.
+local function draw_indicator(glyph, draw_shape, sc, alpha)
+    sc = sc or 1.0
+    alpha = alpha or icon_style.opacity
+
+    local cx, cy
     if options.themed_icons then
-        return string.format([[{\\rDefault\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&\\fs%s\\fn%s}%s]],
-            state.indicator_pos, icon_style.opacity, options.icon_border_width, icon_style.color, icon_style.border_color, options.themed_icon_size, icon_style.font, icon_style.theme.pause_icon)
+        local half_icon   = math.floor(options.themed_icon_size / 2)
+        local half_circle = options.circle_enabled and options.circle_radius or 0
+        cx, cy = slot_center(state.indicator_pos, math.max(half_icon, half_circle) + 10)
+    else
+        cx, cy = slot_center(state.indicator_pos)
     end
 
-    return string.format([[{\\rDefault\\p1\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&}m 0 0 l %d 0 l %d %d l 0 %d m %d 0 l %d 0 l %d %d l %d %d{\\p0}]],
-        state.indicator_pos, icon_style.opacity, options.icon_border_width, icon_style.color, icon_style.border_color, options.rectangles_width, options.rectangles_width,
-        options.rectangles_height, options.rectangles_height, options.rectangles_width + options.rectangles_spacing,
-        options.rectangles_width * 2 + options.rectangles_spacing, options.rectangles_width * 2 + options.rectangles_spacing,
-        options.rectangles_height, options.rectangles_width + options.rectangles_spacing, options.rectangles_height)
-end
+    local ass = assdraw.ass_new()
+    ass.scale = 1
+    if options.circle_enabled then append_circle(ass, cx, cy, alpha, sc) end
+    ass:new_event()
 
--- play icon
-local function draw_triangle()
     if options.themed_icons then
-        return string.format([[{\\rDefault\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&\\fs%s\\fn%s}%s]],
-            state.indicator_pos, icon_style.opacity, options.icon_border_width, icon_style.color, icon_style.border_color, options.themed_icon_size, icon_style.font, icon_style.theme.play_icon)
+        ass:append(string.format([[{\\rDefault\\an5\\pos(%d,%d)\\1a&H%s&\\3a&H%s&\\bord%s\\1c&H%s&\\3c&H%s&\\fs%s\\fn%s}%s]],
+            cx, cy, alpha, alpha, options.icon_border_width, icon_style.color, icon_style.border_color,
+            math.floor(options.themed_icon_size * sc), icon_style.font, glyph))
+    else
+        draw_shape(ass, cx, cy, sc, alpha)
     end
 
-    return string.format([[{\\rDefault\\p1\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&}m 0 0 l %d %d l 0 %d{\\p0}]],
-        state.indicator_pos, icon_style.opacity, options.icon_border_width, icon_style.color, icon_style.border_color, options.triangle_width, options.triangle_height / 2, options.triangle_height)
+    return ass.text
 end
+
+-- pause or play icon (type = "pause" or "play", sc = scale 0.0-1.0, alpha = ASS hex string e.g. "B2")
+local function draw_icon(type, sc, alpha)
+    local is_pause = (type == "pause")
+    local glyph    = is_pause and icon_style.theme.pause_icon or icon_style.theme.play_icon
+    local hw = is_pause and math.floor((options.rectangles_width * 2 + options.rectangles_spacing) / 2 * (sc or 1.0))
+                        or  math.floor(options.triangle_width / 2 * (sc or 1.0))
+    local hh = is_pause and math.floor(options.rectangles_height / 2 * (sc or 1.0))
+                        or  math.floor(options.triangle_height / 2 * (sc or 1.0))
+    return draw_indicator(glyph, function(ass, cx, cy, sc, alpha)
+        ass:append(string.format("{\\rDefault\\an7\\pos(%d,%d)\\1a&H%s&\\3a&H%s&\\bord%s\\1c&H%s&\\3c&H%s&}",
+            cx-hw, cy-hh, alpha, alpha, options.icon_border_width, icon_style.color, icon_style.border_color))
+        ass:draw_start()
+        if is_pause then
+            local rw = math.floor(options.rectangles_width * sc)
+            local sp = math.floor(options.rectangles_spacing * sc)
+            ass:rect_cw(0, 0, rw, hh*2)
+            ass:rect_cw(rw+sp, 0, hw*2, hh*2)
+        else
+            ass:move_to(0, 0)
+            ass:line_to(hw*2, hh)
+            ass:line_to(0, hh*2)
+        end
+        ass:draw_stop()
+    end, sc, alpha)
+end
+
 
 -- mute icon
-local function draw_mute()
+local function draw_mute(sc, alpha)
+    alpha = alpha or icon_style.opacity
+    local cx, cy = slot_center(state.mute_pos, math.floor(options.mute_icon_size / 2) + 15)
     if options.themed_icons then
-        return string.format([[{\\rDefault\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&\\fs%s\\fn%s}%s]],
-            state.mute_pos, icon_style.opacity, options.icon_border_width,
-            icon_style.color, icon_style.border_color, options.mute_icon_size, icon_style.font, icon_style.theme.mute_icon)
+        return string.format([[{\\rDefault\\an5\\pos(%d,%d)\\1a&H%s&\\3a&H%s&\\bord%s\\1c&H%s&\\3c&H%s&\\fs%s\\fn%s}%s]], cx, cy, alpha, alpha, options.icon_border_width, icon_style.color, icon_style.border_color, options.mute_icon_size, icon_style.font, icon_style.theme.mute_icon)
     end
 
     -- path drawn on a 509.47x430.82 canvas
     -- fscx/fscy are %, so (target / 509.47 * 100) scales to mute_icon_size
     local scale = math.floor(options.mute_icon_size / 509.47 * 100 + 0.5)
+    local icon_w = math.floor(509.47 * scale / 100 + 0.5)
+    local icon_h = math.floor(430.82 * scale / 100 + 0.5)
+    local px = cx - math.floor(icon_w / 2)
+    local py = cy - math.floor(icon_h / 2)
 
     -- from Fticons - MIT License
     -- https://github.com/Financial-Times/fticons
@@ -192,10 +262,12 @@ local function draw_mute()
         "l 397.47 215.4 " .. "l 330.27 282.6 " .. "l 352.67 305 " .. "l 419.87 237.8 " ..
         "l 487.07 305 " .. "{\\p0}"
 
-    return string.format([[{\\rDefault\\an%s\\alpha&H%s\\bord%s\\1c&H%s&\\3c&H%s&\\fscx%s\\fscy%s}%s]],
-        state.mute_pos, icon_style.opacity, options.icon_border_width,
+    return string.format([[{\\rDefault\\an7\\pos(%d,%d)\\1a&H%s&\\3a&H%s&\\bord%s\\1c&H%s&\\3c&H%s&\\fscx%s\\fscy%s}%s]],
+        px, py, alpha, alpha, options.icon_border_width,
         icon_style.color, icon_style.border_color, scale, scale, vol_mute)
 end
+
+local alpha_opaque = tonumber(convert_opacity(options.icon_opacity), 16)
 
 local function kill_timer(key)
     if state[key] then
@@ -204,41 +276,80 @@ local function kill_timer(key)
     end
 end
 
-local function update_indicator(force)
-    if state.aspect == 0 then return end
-    if not force and state.indicator_visible then
-        return
+-- fade an overlay in or out, with optional scale-in; calls on_done when finished
+local function fade(overlay, draw_fn, fade_in, scale, timer_key, on_done)
+    kill_timer(timer_key)
+    local a0 = fade_in and 255 or alpha_opaque
+    local a1 = fade_in and alpha_opaque or 255
+    local s0 = (fade_in and scale) and (options.anim_scale_from / 100) or 1.0
+    local duration = fade_in and options.anim_in_duration or options.anim_out_duration
+    local steps = math.max(2, math.floor(duration / 0.016))
+    local step = 0
+    local function tick()
+        local t = step / (steps - 1)
+        local a = string.format("%02X", math.floor(a0 + (a1 - a0) * t + 0.5))
+        local sc = s0 + (1.0 - s0) * t
+        -- pass alpha and scale directly into draw_fn — no gsub needed,
+        -- guarantees circle and icon always get the exact same alpha value
+        overlay.data = draw_fn(sc, a)
+        overlay:update()
+        step = step + 1
+        if step >= steps then
+            kill_timer(timer_key)
+            if on_done then on_done() end
+        end
     end
-    state.indicator_overlay:remove()
-    state.indicator_overlay.data = (options.indicator_icon == "play") and draw_triangle() or draw_rectangles()
-    state.indicator_overlay:update()
-    state.indicator_visible = true
+    tick()
+    if steps > 1 then
+        state[timer_key] = mp.add_periodic_timer(duration / steps, tick)
+    end
+end
 
+-- show or hide an overlay immediately or via animation
+local function set_overlay(overlay, draw_fn, timer_key, show, scale, on_done)
+    if options.anim_enabled then
+        fade(overlay, draw_fn, show, show and scale or false, timer_key, on_done)
+    elseif show then
+        overlay.data = draw_fn()
+        overlay:update()
+    else
+        overlay:remove()
+        if on_done then on_done() end
+    end
+end
+
+local function update_indicator(force)
+    if state.virt_w == 0 then return end
+    if not force and state.indicator_visible then return end
+    local draw_fn = (options.indicator_icon == "play") and function(sc, a) return draw_icon("play",  sc, a) end
+                                                        or  function(sc, a) return draw_icon("pause", sc, a) end
+    set_overlay(state.indicator_overlay, draw_fn, "anim_timer", true, true)
+    state.indicator_visible = true
     if not options.indicator_stay then
         kill_timer("indicator_timer")
         state.indicator_timer = mp.add_timeout(options.indicator_timeout, function()
-            state.indicator_overlay:remove()
-            state.indicator_visible = false
+            set_overlay(state.indicator_overlay, draw_fn, "anim_timer", false, nil, function()
+                state.indicator_overlay:remove()
+                state.indicator_visible = false
+            end)
         end)
     end
 end
 
 local function update_flash_icon()
-    if state.aspect == 0 or not options.flash_play_icon then return end
+    if state.virt_w == 0 or not options.flash_play_icon then return end
     kill_timer("flash_timer")
-    state.flash_overlay:remove()
-    state.flash_overlay.data = draw_triangle()
-    state.flash_overlay:update()
+    local flash_fn = function(sc, a) return draw_icon("play", sc, a) end
+    set_overlay(state.flash_overlay, flash_fn, "anim_timer", true, true)
     state.flash_timer = mp.add_timeout(options.flash_icon_timeout, function()
-        state.flash_overlay:remove()
+        set_overlay(state.flash_overlay, flash_fn, "anim_timer", false, nil,
+            function() state.flash_overlay:remove() end)
     end)
 end
 
 local function update_mute_icon()
-    if state.aspect == 0 then return end
-    state.mute_overlay:remove()
-    state.mute_overlay.data = draw_mute()
-    state.mute_overlay:update()
+    if state.virt_w == 0 then return end
+    set_overlay(state.mute_overlay, draw_mute, "mute_anim_timer", true, false)
 end
 
 local function is_video()
@@ -287,9 +398,16 @@ local pause_observer = function(_, paused)
     end
 end
 
+local function update_virt_w()
+    local w, h, aspect = mp.get_osd_size()
+    state.virt_w = aspect > 0 and math.floor(VIRT_H * aspect + 0.5) or (h > 0 and math.floor(VIRT_H * (w / h) + 0.5) or 1280)
+    for _, ov in ipairs({state.indicator_overlay, state.flash_overlay, state.mute_overlay}) do
+        ov.res_x = state.virt_w
+    end
+end
+
 local dimensions_observer = function()
-    local _, _, aspect = mp.get_osd_size()
-    state.aspect = aspect
+    update_virt_w()
     if state.indicator_visible then
         update_indicator(true)
     end
@@ -302,9 +420,11 @@ local mute_observer = function(_, val)
     if val then
         update_mute_icon()
         state.mute_visible = true
-    else
-        state.mute_overlay:remove()
-        state.mute_visible = false
+    elseif state.mute_visible then
+        set_overlay(state.mute_overlay, draw_mute, "mute_anim_timer", false, nil, function()
+            state.mute_overlay:remove()
+            state.mute_visible = false
+        end)
     end
 end
 
@@ -325,6 +445,8 @@ end
 local function shutdown()
     kill_timer("indicator_timer")
     kill_timer("flash_timer")
+    kill_timer("anim_timer")
+    kill_timer("mute_anim_timer")
 
     state.flash_overlay:remove()
     state.indicator_overlay:remove()
@@ -338,11 +460,17 @@ local function shutdown()
     unobserve()
 end
 
+mp.register_event("shutdown", shutdown)
+
 mp.register_event("file-loaded", function()
     unobserve()
+    state.indicator_overlay:remove()
+    state.flash_overlay:remove()
+    state.mute_overlay:remove()
+    state.indicator_visible = false
+    state.mute_visible = false
     if is_video() then
-        local _, _, aspect = mp.get_osd_size()
-        state.aspect = aspect
+        update_virt_w()
         state.eof = false
         state.paused = false
         mp.observe_property("pause", "bool", pause_observer)
