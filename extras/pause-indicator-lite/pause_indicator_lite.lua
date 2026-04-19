@@ -408,7 +408,12 @@ end
 
 local dimensions_observer = function()
     update_virt_w()
-    if state.indicator_visible then
+    local _, _, aspect = mp.get_osd_size()
+    state.aspect = aspect
+    if state.paused and not state.indicator_visible then
+        update_indicator(true)
+        state.toggled = true
+    elseif state.indicator_visible then
         update_indicator(true)
     end
     if state.mute_visible then
