@@ -581,6 +581,7 @@ local state = {
     wc_anistart = nil,
     wc_animation = nil,
     mouse_down_counter = 0,                 -- used for softrepeat
+    mouse_is_held = false,                  -- true while any mouse button is physically held
     active_element = nil,                   -- nil = none, 0 = background, 1+ = see elements[]
     active_event_source = nil,              -- the "button" that issued the current event
     tc_left_rem = not user_opts.timecurrent,-- if the left timecode should display current or remaining time
@@ -1541,7 +1542,8 @@ local function render_elements(master_ass, osc_vis, wc_vis)
         style_ass:merge(element.style_ass)
         ass_append_alpha(style_ass, element.layout.alpha, 0, nil, anim_override)
 
-        if element.eventresponder and (state.active_element == n) then
+        local is_held_element = (state.mouse_is_held and state.held_element == n) or (state.active_element == n)
+        if element.eventresponder and is_held_element then
             -- run render event functions
             if element.eventresponder.render ~= nil then
                 element.eventresponder.render(element)
@@ -3077,7 +3079,7 @@ local function osc_init()
     end
     bind_buttons("volumebar")
 
-	-- zoom in/out helper
+    -- zoom in/out helper
     local function zoom_step(delta)
         local z = mp.get_property_number("video-zoom", 0)
         mp.commandv("osd-msg", "set", "video-zoom", math.max(user_opts.zoom_out_min, math.min(user_opts.zoom_in_max, z + delta)))
@@ -3456,20 +3458,40 @@ local function element_has_action(element, action)
     return element and element.eventresponder and element.eventresponder[action]
 end
 
+local function get_wheel_cmd(key)
+    local best
+    for _, b in ipairs(mp.get_property_native("input-bindings") or {}) do
+        if b.key == key and b.section ~= "input" and (not best or b.priority > best.priority) then
+            best = b
+        end
+    end
+    return best and best.cmd
+end
+
+local function run_cmd(cmd)
+    if not cmd then return end
+    for c in cmd:gmatch("[^;]+") do
+        mp.command(c:match("^%s*(.-)%s*$"))
+    end
+end
+
 local function process_event(source, what)
     local action = string.format("%s%s", source, what and ("_" .. what) or "")
 
     if what == "down" or what == "press" then
         reset_timeout() -- clicking resets the hideosc timer
 
+        local handled = false
         for n = 1, #elements do
             if mouse_hit(elements[n]) and
                 elements[n].eventresponder and
                 (elements[n].eventresponder[source .. "_up"] or
                     elements[n].eventresponder[action]) then
 
+                handled = true
                 if what == "down" then
                     state.active_element = n
+                    state.held_element = n
                     state.active_event_source = source
                 end
                 -- fire the down or press event if the element has one
@@ -3478,6 +3500,7 @@ local function process_event(source, what)
                 end
             end
         end
+        return handled
     elseif what == "up" then
         if elements[state.active_element] then
             local n = state.active_element
@@ -3496,6 +3519,7 @@ local function process_event(source, what)
             end
         end
         state.active_element = nil
+        state.held_element = nil
         state.mouse_down_counter = 0
     elseif source == "mouse_move" then
         state.mouse_in_window = true
@@ -3573,7 +3597,7 @@ local function render()
     end
 
     -- init management
-    if state.active_element then
+    if state.active_element or state.mouse_is_held then
         -- mouse is held down on some element - keep ticking and ignore initReq
         -- till it's released, or else the mouse-up (click) will misbehave or
         -- get ignored. that's because osc_init() recreates the osc elements,
@@ -3909,24 +3933,56 @@ mp.set_key_bindings({
 }, "showhide_wc", "force")
 do_enable_keybindings()
 
+local osc_last_down_handled = false
+local function osc_binding(source, what)
+    local el_source = source == "mbtn_mid" and "shift+mbtn_left" or source
+    local handled = process_event(el_source, what)
+    if what == "down" then
+        osc_last_down_handled = handled
+        state.mouse_is_held = true
+        request_tick()
+    elseif what == "up" then
+        state.mouse_is_held = false
+        if not osc_last_down_handled then run_cmd(get_wheel_cmd(source:upper())) end
+    elseif what == "press" and not handled then
+        if source:find("_dbl$") then
+            for _, el in ipairs(elements) do
+                if mouse_hit(el) then return end
+            end
+        end
+        run_cmd(get_wheel_cmd(source:upper()))
+    end
+end
+
+local function osc_wheel(source)
+    local action = source .. "_press"
+    for _, el in ipairs(elements) do
+        if mouse_hit(el) and element_has_action(el, action) then
+            process_event(source, "press")
+            return
+        end
+    end
+    run_cmd(get_wheel_cmd(source:upper()))
+end
+
 --mouse input bindings
 mp.set_key_bindings({
-    {"mbtn_left",           function() process_event("mbtn_left", "up") end,
-                            function() process_event("mbtn_left", "down")  end},
-    {"shift+mbtn_left",     function() process_event("shift+mbtn_left", "up") end,
-                            function() process_event("shift+mbtn_left", "down")  end},
-    {"mbtn_right",          function() process_event("mbtn_right", "up") end,
-                            function() process_event("mbtn_right", "down")  end},
-    {"shift+mbtn_right",    function() process_event("shift+mbtn_right", "up") end,
-                            function() process_event("shift+mbtn_right", "down")  end},
-    -- alias to shift_mbtn_left for single-handed mouse use
-    {"mbtn_mid",            function() process_event("shift+mbtn_left", "up") end,
-                            function() process_event("shift+mbtn_left", "down")  end},
-    {"wheel_up",            function() process_event("wheel_up", "press") end},
-    {"wheel_down",          function() process_event("wheel_down", "press") end},
-    {"mbtn_left_dbl",       "ignore"},
-    {"shift+mbtn_left_dbl", "ignore"},
-    {"mbtn_right_dbl",      "ignore"},
+    {"mbtn_left",           function() osc_binding("mbtn_left", "up") end,
+                            function() osc_binding("mbtn_left", "down") end},
+    {"shift+mbtn_left",     function() osc_binding("shift+mbtn_left", "up") end,
+                            function() osc_binding("shift+mbtn_left", "down") end},
+    {"mbtn_right",          function() osc_binding("mbtn_right", "up") end,
+                            function() osc_binding("mbtn_right", "down") end},
+    {"shift+mbtn_right",    function() osc_binding("shift+mbtn_right", "up") end,
+                            function() osc_binding("shift+mbtn_right", "down") end},
+    -- alias to shift+mbtn_left for elements that support it, falls back to input.conf MBTN_MID
+    {"mbtn_mid",            function() osc_binding("mbtn_mid", "up") end,
+                            function() osc_binding("mbtn_mid", "down") end},
+    {"wheel_up",            function() osc_wheel("wheel_up") end},
+    {"wheel_down",          function() osc_wheel("wheel_down") end},
+    {"mbtn_left_dbl",       function() osc_binding("mbtn_left_dbl",       "press") end},
+    {"shift+mbtn_left_dbl", function() osc_binding("shift+mbtn_left_dbl", "press") end},
+    {"mbtn_right_dbl",      function() osc_binding("mbtn_right_dbl",      "press") end},
 }, "input", "force")
 mp.enable_key_bindings("input")
 
