@@ -877,10 +877,11 @@ end
 -- translates global (mouse) coordinates to value
 local function get_slider_value_at(element, glob_pos)
     if element then
+        local clamped_pos = limit_range(element.slider.min.glob_pos, element.slider.max.glob_pos, glob_pos)
         local val = scale_value(
             element.slider.min.glob_pos, element.slider.max.glob_pos,
             element.slider.min.value, element.slider.max.value,
-            glob_pos)
+            clamped_pos)
 
         return limit_range(element.slider.min.value, element.slider.max.value, val)
     end
@@ -1271,11 +1272,11 @@ end
 -- Computes handle position and radius without drawing
 -- Returns handle position, radius, and whether the handle is active (hovered or dragged)
 local function get_seekbar_handle_pos(element)
-    local pos = element.slider.posF()
-    if not pos then return 0, 0, false end
-
     local elem_geo = element.layout.geometry
     local handle_radius = user_opts.seek_handle_size * elem_geo.h / 2
+    local pos = element.state.lastseek ~= nil and element.state.lastseek or element.slider.posF()
+    if not pos then return 0, 0, false end
+
     local handle_x = get_slider_ele_pos_for(element, pos)
     local center_y = elem_geo.h / 2
 
@@ -1514,7 +1515,7 @@ end
 
 -- Draw seekbar progress more accurately
 local function draw_seekbar_progress(element, elem_ass)
-    local pos = element.slider.posF()
+    local pos = element.state.lastseek ~= nil and element.state.lastseek or element.slider.posF()
     if not pos then
         return
     end
@@ -3242,7 +3243,9 @@ local function osc_init()
         element.state.mbtnleft = true
         element.state.was_paused = mp.get_property_bool("pause")
         state.playing_and_seeking = false
-        mp.commandv("seek", get_slider_value(element), "absolute-percent+exact")
+        local seekto = get_slider_value(element)
+        element.state.lastseek = seekto
+        mp.commandv("seek", seekto, "absolute-percent+exact")
     end
     ne.eventresponder["shift+mbtn_left_down"] = function (element)
         element.state.mbtnleft = true
@@ -3277,7 +3280,6 @@ local function osc_init()
         end
     end
     ne.eventresponder["reset"] = function (element)
-        element.state.lastseek = nil
         if element.state.mbtnleft then
             element.state.mbtnleft = false
             if state.playing_and_seeking then
