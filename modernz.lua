@@ -304,6 +304,19 @@ local user_opts = {
     speed_wheel_up_command = "osd-msg add speed 0.25",
 }
 
+-- Custom button defaults (up to 99 custom buttons)
+for i = 1, 99 do
+    user_opts["custom_button_" .. i .. "_content"]             = ""
+    user_opts["custom_button_" .. i .. "_tooltip"]             = ""
+    user_opts["custom_button_" .. i .. "_mbtn_left_command"]   = ""
+    user_opts["custom_button_" .. i .. "_mbtn_right_command"]  = ""
+    user_opts["custom_button_" .. i .. "_mbtn_mid_command"]    = ""
+    user_opts["custom_button_" .. i .. "_wheel_up_command"]    = ""
+    user_opts["custom_button_" .. i .. "_wheel_down_command"]  = ""
+end
+
+local last_custom_button = 0
+
 local osc_param = {                  -- calculated by osc_init()
     playresy = 0,                    -- canvas size Y
     playresx = 0,                    -- canvas size X
@@ -566,6 +579,7 @@ local function set_osc_styles()
         control_2 = "{\\1c&H" .. osc_color_convert(user_opts.middle_buttons_color) .. "&\\fs" .. midbuttons_size .. "\\fn" .. icons.iconfont .. "}",
         control_3 = "{\\1c&H" .. osc_color_convert(user_opts.side_buttons_color) .. "&\\fs" .. sidebuttons_size .. "\\fn" .. icons.iconfont .. "}",
         control_mini = "{\\1c&H" .. osc_color_convert(user_opts.side_buttons_color) .. "&\\fs16\\fn" .. icons.iconfont .. "}",
+        custom_button = "{\\bord0\\1c&H" .. osc_color_convert(user_opts.side_buttons_color) .. "&\\fs" .. sidebuttons_size .. "}",
         element_down = "{\\1c&H" .. osc_color_convert(user_opts.held_element_color) .. "&" .. string.format("\\fscx%s\\fscy%s", user_opts.button_held_size, user_opts.button_held_size) .. "}",
         element_hover = "{" .. (hover_effects.color and "\\1c&H" .. osc_color_convert(user_opts.hover_effect_color) .. "&" or "") .. (hover_effects.size and string.format("\\fscx%s\\fscy%s", user_opts.button_hover_size, user_opts.button_hover_size) or "") .. "}",
         hover_bg = "{\\1c&H" .. osc_color_convert(user_opts.hover_effect_color) .. "&}",
@@ -2399,6 +2413,10 @@ layouts["default"] = function ()
     right_side_button("speed", 1150, user_opts.speed_button, osc_styles.speed, 42)
     right_side_button("download", 1150, state.is_url and user_opts.download_button)
 
+    for i = last_custom_button, 1, -1 do
+        right_side_button("custom_button_" .. i, 0, true, osc_styles.custom_button)
+    end
+
     if user_opts.cache_info then
         right_side_button("cache_info", 1250, user_opts.cache_info, osc_styles.cache, user_opts.cache_info_speed and 70 or 45)
         lo.geometry.x  = lo.geometry.x + 7
@@ -2614,6 +2632,10 @@ layouts["compact"] = function ()
     right_side_button("download", 800, state.is_url and user_opts.download_button)
     right_side_button("speed", 800, user_opts.speed_button, osc_styles.speed, 42)
 
+    for i = last_custom_button, 1, -1 do
+        right_side_button("custom_button_" .. i, 0, true, osc_styles.custom_button)
+    end
+
     -- time codes
     local time_codes_width = get_time_codes_width()
     elements["time_codes"].visible = (state.duration or 0) > 0
@@ -2788,6 +2810,10 @@ layouts["mini"] = function ()
     right_side_button("playlist", 600, user_opts.playlist_button)
     right_side_button("download", 700, state.is_url and user_opts.download_button)
     right_side_button("speed", 700, user_opts.speed_button, osc_styles.speed, 42)
+
+    for i = last_custom_button, 1, -1 do
+        right_side_button("custom_button_" .. i, 0, true, osc_styles.custom_button)
+    end
 
     -- time codes
     local time_codes_width = get_time_codes_width()
@@ -2968,6 +2994,11 @@ layouts["modern-image"] = function ()
     if info_button then right_side_button("info", 400) end
     if ontop_button then right_side_button("ontop", 450) end
     if user_opts.download_button then right_side_button("download", 500, state.is_url) end
+
+    for i = last_custom_button, 1, -1 do
+        right_side_button("custom_button_" .. i, 0, nil)
+        lo.style = osc_styles.custom_button
+    end
 end
 
 local function set_bar_visible(visible_key, visible)
@@ -3578,6 +3609,18 @@ local function osc_init()
     ne.eventresponder["mbtn_right_up"] = function()
         state.tc_ms = not state.tc_ms
         request_init()
+    end
+
+    last_custom_button = 0
+    for i = 1, 99 do
+        local content = user_opts["custom_button_" .. i .. "_content"]
+        if not content or content == "" then break end
+        local ne = new_element("custom_button_" .. i, "button")
+        ne.content = content
+        local tip = user_opts["custom_button_" .. i .. "_tooltip"]
+        if tip and tip ~= "" then ne.tooltipF = tip end
+        bind_buttons("custom_button_" .. i)
+        last_custom_button = i
     end
 
     -- load layout
